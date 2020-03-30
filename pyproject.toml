@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "metacopy"
+version = "0.1.0"
+description = ""
+authors = ["aleontiev <alonetiev@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+adbc = {git = "https://github.com/aleontiev/adbc.git", rev = "v0.1.8" }
+cleo = "^0.7.6"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+
+[tool.poetry.scripts]
+metacopy = "metacopy.cli:main"
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
+
