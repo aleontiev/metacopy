@@ -2,6 +2,7 @@ import asyncio
 
 from collections import defaultdict
 import json
+import re
 
 from cleo import Command
 from adbc.database import Database
@@ -13,12 +14,14 @@ except ImportError:
     uvloop = None
 
 
-tables = {
+COLLECTION_PERMISSION_REGEX = re.compile(r'/collection/([0-9]+)/(.*)')
+TABLES = {
     "card": "report_card",
     "table": "metabase_table",
     "field": "metabase_field",
     "database": "metabase_database",
     "collection": "collection",
+    "permissions": "permissions",
     "dashboard": "report_dashboard",
     "dashboard_card": "report_dashboardcard",
     "card_series": "dashboardcard_series",
@@ -26,7 +29,7 @@ tables = {
 
 
 async def get_model(db, name):
-    return await db.model("public", tables.get(name, name))
+    return await db.model("public", TABLES.get(name, name))
 
 
 async def drop_collections(
@@ -37,6 +40,7 @@ async def drop_collections(
     Dashboard = await get_model(db, "dashboard")
     DashboardCard = await get_model(db, "dashboard_card")
     CardSeries = await get_model(db, "card_series")
+    Permissions = await get_model(db, "permissions")
 
     where = {
         ".and": [
@@ -57,6 +61,9 @@ async def drop_collections(
     collection_ids = [c["id"] for c in collections if should_process(c["name"], only)]
     if not collection_ids:
         return
+
+    permissions = await permissions_for(Permissions, collection_ids)
+    permission_ids = [p['id'] for p in permissions]
     card_ids = (
         await Card.where({"collection_id": {"in": collection_ids}}).field("id").get()
     )
@@ -75,11 +82,51 @@ async def drop_collections(
         .field("id")
         .get()
     )
-    await CardSeries.where({"id": {"in": cardseries_ids}}).delete()
-    await DashboardCard.where({"id": {"in": dashboardcard_ids}}).delete()
-    await Dashboard.where({"id": {"in": dashboard_ids}}).delete()
-    await Card.where({"id": {"in": card_ids}}).delete()
-    await Collection.where({"id": {"in": collection_ids}}).delete()
+    if permission_ids:
+        await Permissions.where({"id": {"in": permission_ids}}).delete()
+    if cardseries_ids:
+        await CardSeries.where({"id": {"in": cardseries_ids}}).delete()
+    if dashboardcard_ids:
+        await DashboardCard.where({"id": {"in": dashboardcard_ids}}).delete()
+    if dashboard_ids:
+        await Dashboard.where({"id": {"in": dashboard_ids}}).delete()
+    if card_ids:
+        await Card.where({"id": {"in": card_ids}}).delete()
+    if collection_ids:
+        await Collection.where({"id": {"in": collection_ids}}).delete()
+
+
+async def permissions_for(Permissions, collection_ids):
+    permissions = (
+        await Permissions.where({"object": {"starts.with": "/collection/"}}).get()
+    )
+    return [
+        p for p in permissions if any([f'/{c}/' in p['object'] for c in collection_ids])
+    ]
+
+
+def remap_permissions(permission, collections):
+    permissions = []
+    collection = COLLECTION_PERMISSION_REGEX.match(permission['object'])
+    collection_id = int(collection.group(1))
+    remainder = collection.group(2)
+    collections = collections[collection_id]
+    for target, new_ids in collections.items():
+        for new_id in new_ids:
+            new_permission = dict(permission.items())
+            new_permission['object'] = f'/collection/{new_id}/{remainder}'
+            new_permission.pop('id')
+    return permissions
+
+
+async def copy_permissions(db, collections):
+    Permissions = await get_model(db, 'permissions')
+    collection_ids = collections.keys()
+    permissions = await permissions_for(Permissions, collection_ids)
+    for permission in permissions:
+        new_permissions = remap_permissions(permission, collections)
+        if new_permissions:
+            await Permissions.body(new_permissions).add()
 
 
 async def copy_collections(db, databases, base, collections, cards, dashboards):
@@ -401,6 +448,7 @@ async def copy(
         await copy_collections(
             db, databases, base_collections, collections, cards, dashboards
         )
+        await copy_permissions(db, collections)
         await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards)
         await copy_cardseries(db, databases, dashboardcards, cards)
         if rollback:
