@@ -240,7 +240,7 @@ async def remap_field(db, field_id, target, cards):
             .one()
         )
 
-    return db._cache["fields_by_name"](key)
+    return db._cache["fields_by_name"][key]
 
 
 async def remap_table(db, table_id, target, cards):
