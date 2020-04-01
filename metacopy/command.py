@@ -225,22 +225,22 @@ async def remap_dashboard(db, dashboard, target, collections):
 
 async def remap_field(db, field_id, target, cards):
     Field = await get_model(db, "field")
-    if field_id not in db._cache['fields_by_id']:
+    if field_id not in db._cache["fields_by_id"]:
         field = await Field.take("name", "table_id").get(field_id)
-        db._cache['fields_by_id'][field_id] = field
+        db._cache["fields_by_id"][field_id] = field
 
-    field = db._cache['fields_by_id'][field_id]
+    field = db._cache["fields_by_id"][field_id]
     target_table = await remap_table(db, field["table_id"], target, cards)
 
-    key = (target_table, field['name'])
-    if key not in db._cache['fields_by_name']:
-        db._cache['fields_by_name'][key] = (
+    key = (target_table, field["name"])
+    if key not in db._cache["fields_by_name"]:
+        db._cache["fields_by_name"][key] = (
             await Field.where({"name": field["name"], "table_id": target_table})
             .field("id")
             .one()
         )
 
-    return db._cache['fields_by_name'](key)
+    return db._cache["fields_by_name"](key)
 
 
 async def remap_table(db, table_id, target, cards):
@@ -250,19 +250,21 @@ async def remap_table(db, table_id, target, cards):
         new_id = cards[card_id][target]
         return f"card__{new_id}"
     else:
-        if table_id not in db._cache['tables_by_id']:
-            table = await Table.take("name", "schema").get(table_id)
-        table = db._cache['tables_by_id'][table_id]
+        if table_id not in db._cache["tables_by_id"]:
+            db._cache["tables_by_id"][table_id] = await Table.take(
+                "name", "schema"
+            ).get(table_id)
+        table = db._cache["tables_by_id"][table_id]
         schema = table["schema"]
         name = table["name"]
         key = (target, schema, name)
-        if key not in db._cache['tables_by_name']:
-            db._cache['tables_by_name'][key] = (
+        if key not in db._cache["tables_by_name"]:
+            db._cache["tables_by_name"][key] = (
                 await Table.where({"schema": schema, "name": name, "db_id": target})
                 .field("id")
                 .one()
             )
-        return db._cache['tables_by_name'][key]
+        return db._cache["tables_by_name"][key]
 
 
 async def remap_query(db, query, target, cards):
@@ -317,10 +319,10 @@ def should_process(name, only):
 
 def setup_cache(db):
     db._cache = {
-        'fields_by_id': {},
-        'fields_by_name': {},
-        'tables_by_name': {},
-        'tables_by_id': {}
+        "fields_by_id": {},
+        "fields_by_name": {},
+        "tables_by_name": {},
+        "tables_by_id": {},
     }
 
 
