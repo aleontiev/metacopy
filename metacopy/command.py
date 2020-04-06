@@ -14,7 +14,7 @@ except ImportError:
     uvloop = None
 
 
-COLLECTION_PERMISSION_REGEX = re.compile(r'/collection/([0-9]+)/(.*)')
+COLLECTION_PERMISSION_REGEX = re.compile(r"/collection/([0-9]+)/(.*)")
 TABLES = {
     "card": "report_card",
     "table": "metabase_table",
@@ -30,6 +30,26 @@ TABLES = {
 
 async def get_model(db, name):
     return await db.model("public", TABLES.get(name, name))
+
+
+async def reset_sequences(db):
+    for model in (
+        "collection",
+        "card",
+        "dashboard",
+        "dashboard_card",
+        "card_series",
+        "permissions",
+    ):
+        model = await get_model(db, model)
+        table = model.table
+        schema = table.namespace.name
+        pk = table.pks[0]
+        seq = f"{table.name}_id_seq"
+        await db.execute(
+            f"SELECT setval('{schema}.{seq}',"
+            f'(SELECT COALESCE(MAX("{pk}"), 1) + 100 FROM {table.sql_name}))'
+        )
 
 
 async def drop_collections(
@@ -63,7 +83,7 @@ async def drop_collections(
         return
 
     permissions = await permissions_for(Permissions, collection_ids)
-    permission_ids = [p['id'] for p in permissions]
+    permission_ids = [p["id"] for p in permissions]
     card_ids = (
         await Card.where({"collection_id": {"in": collection_ids}}).field("id").get()
     )
@@ -97,30 +117,30 @@ async def drop_collections(
 
 
 async def permissions_for(Permissions, collection_ids):
-    permissions = (
-        await Permissions.where({"object": {"starts.with": "/collection/"}}).get()
-    )
+    permissions = await Permissions.where(
+        {"object": {"starts.with": "/collection/"}}
+    ).get()
     return [
-        p for p in permissions if any([f'/{c}/' in p['object'] for c in collection_ids])
+        p for p in permissions if any([f"/{c}/" in p["object"] for c in collection_ids])
     ]
 
 
 def remap_permissions(permission, collections):
     permissions = []
-    collection = COLLECTION_PERMISSION_REGEX.match(permission['object'])
+    collection = COLLECTION_PERMISSION_REGEX.match(permission["object"])
     collection_id = int(collection.group(1))
     remainder = collection.group(2)
     collections = collections[collection_id]
-    for target, new_ids in collections.items():
-        for new_id in new_ids:
-            new_permission = dict(permission.items())
-            new_permission['object'] = f'/collection/{new_id}/{remainder}'
-            new_permission.pop('id')
+    for target, new_id in collections.items():
+        new_permission = dict(permission.items())
+        new_permission["object"] = f"/collection/{new_id}/{remainder}"
+        new_permission.pop("id")
+        permissions.append(new_permission)
     return permissions
 
 
 async def copy_permissions(db, collections):
-    Permissions = await get_model(db, 'permissions')
+    Permissions = await get_model(db, "permissions")
     collection_ids = collections.keys()
     permissions = await permissions_for(Permissions, collection_ids)
     for permission in permissions:
@@ -445,6 +465,7 @@ async def copy(
         await drop_collections(
             db, databases, root_collection_id, base_collection_id, only
         )
+        await reset_sequences(db)
         await copy_collections(
             db, databases, base_collections, collections, cards, dashboards
         )
