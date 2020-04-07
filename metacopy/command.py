@@ -314,7 +314,11 @@ async def remap_table(db, table_id, target, cards):
     Table = await get_model(db, "table")
     if isinstance(table_id, str) and table_id.startswith("card__"):
         card_id = int(table_id.replace("card__", ""))
-        new_id = cards[card_id][target]
+        try:
+            new_id = cards[card_id][target]
+        except KeyError:
+            print(f'error resolving card {card_id}')
+            raise
         return f"card__{new_id}"
     else:
         if table_id not in db._cache["tables_by_id"]:
