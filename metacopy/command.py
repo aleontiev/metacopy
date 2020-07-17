@@ -17,6 +17,7 @@ except ImportError:
 COLLECTION_PERMISSION_REGEX = re.compile(r"/collection/([0-9]+)/(.*)")
 TABLES = {
     "card": "report_card",
+    "question": "report_card",
     "table": "metabase_table",
     "field": "metabase_field",
     "database": "metabase_database",
@@ -165,13 +166,17 @@ async def copy_collections(db, databases, base, collections, cards, dashboards):
         )
 
 
-async def copy_card(db, card, databases, collections, cards):
+async def copy_card(db, card, databases, cards=None, collections=None):
     Card = await get_model(db, "card")
     card_id = card["id"]
     for target in databases.keys():
-        new_card = await remap_card(db, card, target, collections, cards)
+        new_card = await remap_card(
+            db, card, target, cards=cards, collections=collections
+        )
         new_card = await Card.body(new_card).take("id").add()
-        cards[card_id][target] = new_card["id"]
+        if cards:
+            cards[card_id][target] = new_card["id"]
+    return new_card["id"]
 
 
 async def copy_dashboard(db, dashboard, databases, collections, dashboards):
@@ -190,7 +195,7 @@ async def copy_collection_items(
     Dashboard = await get_model(db, "dashboard")
 
     for card in await Card.where({"collection_id": collection_id}).sort("id").get():
-        await copy_card(db, card, databases, collections, cards)
+        await copy_card(db, card, databases, cards=cards, collections=collections)
     for dashboard in (
         await Dashboard.where({"collection_id": collection_id}).sort("id").get()
     ):
@@ -297,7 +302,7 @@ async def remap_field(db, field_id, target, cards):
         db._cache["fields_by_id"][field_id] = field
 
     field = db._cache["fields_by_id"][field_id]
-    target_table = await remap_table(db, field["table_id"], target, cards)
+    target_table = await remap_table(db, field["table_id"], target, cards=cards)
 
     key = (target_table, field["name"])
     if key not in db._cache["fields_by_name"]:
@@ -310,15 +315,23 @@ async def remap_field(db, field_id, target, cards):
     return db._cache["fields_by_name"][key]
 
 
-async def remap_table(db, table_id, target, cards):
+async def remap_table(db, table_id, target, cards=None):
     Table = await get_model(db, "table")
     if isinstance(table_id, str) and table_id.startswith("card__"):
         card_id = int(table_id.replace("card__", ""))
-        try:
-            new_id = cards[card_id][target]
-        except KeyError:
-            print(f'error resolving card {card_id}')
-            raise
+        if cards is not None:
+            # assume this card was already remapped and exists in `cards`
+            try:
+                new_id = cards[card_id][target]
+            except KeyError:
+                print(f"error resolving card {card_id}")
+                raise
+        else:
+            # recursively copy this card
+            Card = await get_model(db, "card")
+            card = await Card.key(card_id).one()
+            new_id = await copy_card(db, card, {target: 1})
+
         return f"card__{new_id}"
     else:
         if table_id not in db._cache["tables_by_id"]:
@@ -338,13 +351,13 @@ async def remap_table(db, table_id, target, cards):
         return db._cache["tables_by_name"][key]
 
 
-async def remap_query(db, query, target, cards):
+async def remap_query(db, query, target, cards=None):
     if isinstance(query, list):
         if len(query) == 2 and query[0] == "field-id":
-            field = await remap_field(db, query[1], target, cards)
+            field = await remap_field(db, query[1], target, cards=cards)
             return ["field-id", field]
         else:
-            return [await remap_query(db, q, target, cards) for q in query]
+            return [await remap_query(db, q, target, cards=cards) for q in query]
     elif isinstance(query, dict):
         result = {}
         for key, value in query.items():
@@ -352,26 +365,32 @@ async def remap_query(db, query, target, cards):
             if key == "database":
                 new_value = target
             elif key == "source-table":
-                new_value = await remap_table(db, value, target, cards)
+                new_value = await remap_table(db, value, target, cards=cards)
             elif key == "fingerprint":
                 new_value = None
             elif key == "card_id":
                 if value is not None:
-                    new_value = cards[value][target]
+                    if cards is not None:
+                        new_value = cards[value][target]
+                    else:
+                        Card = await get_model(db, 'card')
+                        card = await Card.key(card_id).one()
+                        new_value = await copy_card(db, card, {target: 1})
             else:
-                new_value = await remap_query(db, value, target, cards)
+                new_value = await remap_query(db, value, target, cards=cards)
             result[key] = new_value
         query = result
 
     return query
 
 
-async def remap_card(db, card, target, collections, cards):
+async def remap_card(db, card, target, cards=None, collections=None):
     card = dict(card.items())
     query = json.loads(card["dataset_query"])
-    query = await remap_query(db, query, target, cards)
+    query = await remap_query(db, query, target, cards=cards)
     card["dataset_query"] = json.dumps(query)
-    card["collection_id"] = collections[card["collection_id"]][target]
+    if collections:
+        card["collection_id"] = collections[card["collection_id"]][target]
     card.pop("id")
     return card
 
@@ -397,6 +416,46 @@ def setup_cache(db):
     }
 
 
+def get_database(verbose=False, prompt=False, config=None, url=None):
+    connection_kwargs = {"verbose": verbose, "prompt": prompt}
+    if config:
+        config = get_config(config)
+        connection_kwargs["config"] = config["databases"]["metabase"]
+    elif url:
+        connection_kwargs["url"] = url
+
+    return Database(**connection_kwargs)
+
+
+async def copy_question(
+    question,
+    database,
+    url=None,
+    config=None,
+    rollback=False,
+    verbose=False,
+    prompt=False,
+):
+    db = get_database(verbose=verbose, prompt=prompt, config=config, url=url)
+    setup_cache(db)
+    Card = await get_model(db, "card")
+    DB = await get_model(db, "database")
+
+    question = int(question)
+    source_card = await Card.key(question).one()
+    target_database = (
+        await DB.take("id", "name")
+        .where({".or": [{"name": {"starts.with": database}}, {"name": database}]})
+        .one()
+    )
+
+    databases = {target_database["id"]: target_database["name"]}
+    new_id = await copy_card(db, source_card, databases)
+    if verbose:
+        print(f"new card ID: {new_id}")
+    return new_id
+
+
 async def copy(
     alls,
     base,
@@ -407,14 +466,7 @@ async def copy(
     rollback=False,
     prompt=False,
 ):
-    connection_kwargs = {"verbose": verbose, "prompt": prompt}
-    if config:
-        config = get_config(config)
-        connection_kwargs["config"] = config["databases"]["metabase"]
-    elif url:
-        connection_kwargs["url"] = url
-
-    db = Database(**connection_kwargs)
+    db = get_database(verbose=verbose, prompt=prompt, config=config, url=url)
     setup_cache(db)
     connection = await db.get_connection()
     db.use(connection)
@@ -478,6 +530,41 @@ async def copy(
         await copy_cardseries(db, databases, dashboardcards, cards)
         if rollback:
             raise Exception("rollback transaction")
+
+
+class CopyQuestion(Command):
+    """Copies single Metabase question within the same collection, changing datasource
+
+    copy-question
+        {question : ID of question (e.g. 12345)}
+        {database : name of database to target (e.g: foo)}
+        {--r|rollback : dry run, rollback after run}
+        {--c|config=adbc.yml : config filename}
+        {--p|prompt : prompt before all queries}
+        {--u|url= : DB connection string}
+    """
+
+    def handle(self):
+        if uvloop:
+            uvloop.install()
+        question = self.argument("question")
+        database = self.argument("database")
+        rollback = self.option("rollback")
+        config = self.option("config")
+        prompt = self.option("prompt")
+        url = self.option("url")
+        verbose = self.option("verbose")
+        asyncio.run(
+            copy_question(
+                question,
+                database,
+                url=url,
+                config=config,
+                rollback=rollback,
+                verbose=verbose,
+                prompt=prompt,
+            )
+        )
 
 
 class Copy(Command):
