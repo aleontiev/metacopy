@@ -174,7 +174,7 @@ async def copy_card(db, card, databases, cards=None, collections=None):
             db, card, target, cards=cards, collections=collections
         )
         new_card = await Card.body(new_card).take("id").add()
-        if cards:
+        if cards is not None:
             cards[card_id][target] = new_card["id"]
     return new_card["id"]
 
@@ -324,7 +324,11 @@ async def remap_table(db, table_id, target, cards=None):
             try:
                 new_id = cards[card_id][target]
             except KeyError:
-                print(f"error resolving card {card_id}")
+                print(
+                    f"error resolving card#{card_id} while remapping a table "
+                    f"to DB#{target}"
+                )
+                print(f'(cards = {cards.keys()})')
                 raise
         else:
             # recursively copy this card
@@ -365,7 +369,11 @@ async def remap_query(db, query, target, cards=None):
             if key == "database":
                 new_value = target
             elif key == "source-table":
-                new_value = await remap_table(db, value, target, cards=cards)
+                try:
+                    new_value = await remap_table(db, value, target, cards=cards)
+                except KeyError:
+                    print(f"error remapping table during remap_query {query}")
+                    raise
             elif key == "fingerprint":
                 new_value = None
             elif key == "card_id":
@@ -387,7 +395,12 @@ async def remap_query(db, query, target, cards=None):
 async def remap_card(db, card, target, cards=None, collections=None):
     card = dict(card.items())
     query = json.loads(card["dataset_query"])
-    query = await remap_query(db, query, target, cards=cards)
+    try:
+        query = await remap_query(db, query, target, cards=cards)
+    except Exception:
+        print(f'error remapping card#{card["id"]} to db#{target}')
+        raise
+
     card["dataset_query"] = json.dumps(query)
     if collections:
         card["collection_id"] = collections[card["collection_id"]][target]
