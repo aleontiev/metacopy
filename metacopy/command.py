@@ -98,6 +98,11 @@ async def drop_collections(
         .field("id")
         .get()
     )
+    other_dashboardcard_ids = (
+        await DashboardCard.where({"card_id": {"in": card_ids}})
+        .field("id")
+        .get()
+    )
     cardseries_ids = (
         await CardSeries.where({"dashboardcard_id": {"in": dashboardcard_ids}})
         .field("id")
@@ -109,6 +114,8 @@ async def drop_collections(
         await CardSeries.where({"id": {"in": cardseries_ids}}).delete()
     if dashboardcard_ids:
         await DashboardCard.where({"id": {"in": dashboardcard_ids}}).delete()
+    if other_dashboardcard_ids:
+        await DashboardCard.where({"id": {"in": other_dashboardcard_ids}}).delete()
     if dashboard_ids:
         await Dashboard.where({"id": {"in": dashboard_ids}}).delete()
     if card_ids:
