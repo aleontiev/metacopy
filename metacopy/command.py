@@ -247,10 +247,20 @@ async def copy_dashboardcards(db, databases, dashboards, cards, dashboardcards):
 
 def remap_collection_location(location, target, collections):
     parts = [l for l in location.split("/") if l]
-    # remap starting with the 2nd part
-    # the first part will remain the same
-    for i in range(1, len(parts)):
-        parts[i] = collections[int(parts[i])][target]
+    can_fail = True
+    # try to remap each segment
+    for i in range(len(parts)):
+        part = int(parts[i])
+        if part in collections:
+            parts[i] = collections[part][target]
+            # once a segment is remapped, all other segments
+            # must be remappable
+            can_fail = False
+        else:
+            if not can_fail:
+                raise ValueError(
+                    f'failed to remap location {location} segment: {part}'
+                )
     result = "/".join([str(p) for p in parts])
     result = f"/{result}/"
     return result
@@ -447,12 +457,73 @@ def get_database(verbose=False, prompt=False, config=None, url=None):
     return Database(**connection_kwargs)
 
 
+async def copy_collection(
+    collection,
+    database,
+    url=None,
+    config=None,
+    rollback=False,
+    verbose=False,
+    prompt=False
+):
+    db = get_database(verbose=verbose, prompt=prompt, config=config, url=url)
+    setup_cache(db)
+    Collection = await get_model(db, 'collection')
+    DB = await get_model(db, 'database')
+
+    collection_id = int(collection)
+    source_collection = await Collection.key(collection_id).one()
+    source_location = source_collection['location']
+    source_collections = await Collection.where(
+        {"location": {"starts.with": f'{source_location}{collection_id}/'}}
+    ).get()
+    source_collections.append(source_collection)
+
+    target_database = (
+        await DB.take("id", "name")
+        .where({".or": [{"name": {"starts.with": database}}, {"name": database}]})
+        .one()
+    )
+    target_database_id = target_database['id']
+    databases = {target_database_id: target_database["name"]}
+    collections = defaultdict(dict)
+    cards = defaultdict(dict)
+    dashboards = defaultdict(dict)
+    dashboardcards = defaultdict(dict)
+
+    new_id = None
+    connection = await db.get_connection()
+    db.use(connection)
+    async with connection.transaction():
+        await copy_collections(
+            db, databases, source_collections, collections, cards, dashboards
+        )
+        await copy_permissions(db, collections)
+        await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards)
+        await copy_cardseries(db, databases, dashboardcards, cards)
+
+        new_id = collections[collection_id][target_database_id]
+        if verbose:
+            num_cards = len(cards)
+            num_subcollections = len(collections) - 1
+            num_dashboards = len(dashboards)
+            print(f'new collection ID: {new_id}')
+            if num_subcollections:
+                print(f'+ {num_subcollections} sub-collections')
+            if num_cards:
+                print(f'+ {num_cards} cards')
+            if num_dashboards:
+                print(f'+ {num_dashboards} dashboards')
+        if rollback:
+            raise Exception("rollback transaction")
+    return new_id
+
+
 async def copy_question(
     question,
     database,
     url=None,
     config=None,
-    rollback=False,
     verbose=False,
     prompt=False,
 ):
@@ -551,6 +622,38 @@ async def copy(
         if rollback:
             raise Exception("rollback transaction")
 
+class CopyCollection(Command):
+    """Copies Metabase Collection + sub-collections + Questions + Dashboards
+
+    copy-collection
+        {collection : ID of collection (e.g. 12345)}
+        {database : name of database to target (e.g: foo)}
+        {--r|rollback : dry run, rollback after run}
+        {--c|config=adbc.yml : config filename}
+        {--p|prompt : prompt before all queries}
+        {--u|url : Metabase DB connection string}
+    """
+    def handle(self):
+        if uvloop:
+            uvloop.install()
+        collection = self.argument("collection")
+        database = self.argument("database")
+        rollback = self.option("rollback")
+        config = self.option("config")
+        prompt = self.option("prompt")
+        url = self.option("url")
+        verbose = self.option("verbose")
+        asyncio.run(
+            copy_collection(
+                collection,
+                database,
+                url=url,
+                config=config,
+                rollback=rollback,
+                verbose=verbose,
+                prompt=prompt,
+            )
+        )
 
 class CopyQuestion(Command):
     """Copies single Metabase question within the same collection, changing datasource
@@ -561,7 +664,7 @@ class CopyQuestion(Command):
         {--r|rollback : dry run, rollback after run}
         {--c|config=adbc.yml : config filename}
         {--p|prompt : prompt before all queries}
-        {--u|url= : DB connection string}
+        {--u|url= : Metabase DB connection string}
     """
 
     def handle(self):
@@ -580,7 +683,6 @@ class CopyQuestion(Command):
                 database,
                 url=url,
                 config=config,
-                rollback=rollback,
                 verbose=verbose,
                 prompt=prompt,
             )
