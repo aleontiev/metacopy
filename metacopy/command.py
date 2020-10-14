@@ -293,7 +293,12 @@ async def remap_dashboardcard(db, link, target, dashboards, cards):
     # map card/dashboard_id over
     old_card_id = link["card_id"]
     if old_card_id:
-        link["card_id"] = cards[old_card_id][target]
+        try:
+            link["card_id"] = cards[old_card_id][target]
+        except KeyError:
+            raise ValueError(
+                f'Failed to remap dashboardcard on source card: {old_card_id}'
+            )
     link["dashboard_id"] = dashboards[link["dashboard_id"]][target]
 
     query = json.loads(link["parameter_mappings"])
