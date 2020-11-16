@@ -510,7 +510,7 @@ def setup_cache(db):
 
 def get_database(verbose=False, prompt=False, config=None, url=None):
     # -vv or -vvv should add database logging, but not -v
-    verbose = verbose and len(verbose) > 1
+    verbose = verbose and verbose > 1
     connection_kwargs = {"verbose": verbose, "prompt": prompt}
     if config:
         config = get_config(config)
@@ -806,9 +806,15 @@ class Copy(Command):
         url = self.option("url")
         dry = self.option("dry")
         verbose = self.option("verbose")
+        if verbose == 'null':
+            verbose = 1
+        else:
+            try:
+                verbose = int(verbose)
+            except:
+                verbose = 0
         prompt = self.option("prompt")
         only = self.option("only")
-        print(f'verbose: {verbose}')
         asyncio.run(
             copy(
                 alls,
