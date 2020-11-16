@@ -174,11 +174,13 @@ def remap_permissions(permission, collections):
     return permissions
 
 
-async def copy_permissions(db, collections):
+async def copy_permissions(db, collections, verbose=False):
     Permissions = await get_model(db, "permissions")
     collection_ids = collections.keys()
     permissions = await permissions_for(Permissions, collection_ids)
     for permission in permissions:
+        if verbose:
+            print("Copying permission#{permission['id']}...")
         new_permissions = remap_permissions(permission, collections)
         if new_permissions:
             await Permissions.values(literal(new_permissions)).add()
@@ -260,22 +262,26 @@ async def remap_cardseries(db, link, target, dashboardcards, cards):
     return link
 
 
-async def copy_cardseries(db, databases, dashboardcards, cards):
+async def copy_cardseries(db, databases, dashboardcards, cards, verbose=False):
     Series = await get_model(db, "card_series")
     for link in await Series.where({
         "in": ["dashboardcard_id", list(dashboardcards.keys())]
     }).get():
+        if verbose:
+            print(f"Copying cardseries#{link['id']}...")
         for target in databases.keys():
             new_link = await remap_cardseries(db, link, target, dashboardcards, cards)
             await Series.values(literal([new_link])).add()
 
 
-async def copy_dashboardcards(db, databases, dashboards, cards, dashboardcards):
+async def copy_dashboardcards(db, databases, dashboards, cards, dashboardcards, verbose=False):
     DashboardCard = await get_model(db, "dashboard_card")
     for link in await DashboardCard.where({
         "in": ["dashboard_id", list(dashboards.keys())]
     }).get():
         link_id = link["id"]
+        if verbose:
+            print(f"Copying dashboardcard#{link['id']}...")
         for target in databases.keys():
             new_link = await remap_dashboardcard(db, link, target, dashboards, cards)
             new_link = await DashboardCard.values(literal([new_link])).take("id").add()
@@ -701,13 +707,13 @@ async def copy(
         )
         if verbose:
             print('Copying permissions...')
-        await copy_permissions(db, collections)
+        await copy_permissions(db, collections, verbose=verbose)
         if verbose:
             print('Copying dashboardcards...')
-        await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards)
+        await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards, verbose=verbose)
         if verbose:
             print('Copying cardseries...')
-        await copy_cardseries(db, databases, dashboardcards, cards)
+        await copy_cardseries(db, databases, dashboardcards, cards, verbose=verbose)
         if rollback:
             raise Exception("rollback transaction")
 
