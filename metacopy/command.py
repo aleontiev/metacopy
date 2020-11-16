@@ -28,7 +28,7 @@ TABLES = {
     "card_series": "dashboardcard_series",
 }
 
-def literal(x):
+def literal(X):
     if isinstance(X, list):
         return [literal(x) for x in X]
     if isinstance(X, dict):
@@ -184,7 +184,7 @@ async def copy_permissions(db, collections):
             await Permissions.values(literal(new_permissions)).add()
 
 
-async def copy_collections(db, databases, base, collections, cards, dashboards):
+async def copy_collections(db, databases, base, collections, cards, dashboards, verbose=False):
     Collection = await get_model(db, "collection")
     for collection in sorted(base, key=lambda x: x["location"].count("/")):
         collection_id = collection["id"]
@@ -195,8 +195,10 @@ async def copy_collections(db, databases, base, collections, cards, dashboards):
             new_collection = await Collection.values(literal([new_collection])).take("id").add()
             collections[collection_id][target] = new_collection["id"]
 
+        if verbose:
+            print(f'Copying collection #{collection_id}...')
         await copy_collection_items(
-            db, collection_id, databases, collections, cards, dashboards
+            db, collection_id, databases, collections, cards, dashboards, verbose=verbose
         )
 
 
@@ -223,7 +225,7 @@ async def copy_dashboard(db, dashboard, databases, collections, dashboards):
 
 
 async def copy_collection_items(
-    db, collection_id, databases, collections, cards, dashboards
+    db, collection_id, databases, collections, cards, dashboards, verbose=False
 ):
     Card = await get_model(db, "card")
     Dashboard = await get_model(db, "dashboard")
@@ -231,12 +233,16 @@ async def copy_collection_items(
     for card in await Card.where({
         "=": ['collection_id', collection_id]
     }).sort("id").get():
+        if verbose:
+            print(f"Copying card #{card['id']}...")
         await copy_card(db, card, databases, cards=cards, collections=collections)
     for dashboard in (
         await Dashboard.where({
             "=": ["collection_id", collection_id]
         }).sort("id").get()
     ):
+        if verbose:
+            print(f"Copying dashboard #{dashboard['id']}...")
         await copy_dashboard(db, dashboard, databases, collections, dashboards)
 
 
@@ -383,10 +389,13 @@ async def remap_table(db, table_id, target, cards=None):
                 new_id = cards[card_id][target]
             except KeyError:
                 print(
-                    f"error resolving card#{card_id} while remapping a table "
+                    f"error resolving card#{card_id} while remapping table: {table_id} "
                     f"to DB#{target}"
                 )
-                print(f'(cards = {cards.keys()})')
+                if card_id in cards:
+                    print(f"(cards[{card_id}] = {cards[card_id]})")
+                else:
+                    print(f'(cards = {list(cards.keys())})')
                 raise
         else:
             # recursively copy this card
@@ -494,6 +503,8 @@ def setup_cache(db):
 
 
 def get_database(verbose=False, prompt=False, config=None, url=None):
+    # -vv or -vvv should add database logging, but not -v
+    verbose = verbose and len(verbose) > 1
     connection_kwargs = {"verbose": verbose, "prompt": prompt}
     if config:
         config = get_config(config)
@@ -675,15 +686,27 @@ async def copy(
     dashboards = defaultdict(dict)
     dashboardcards = defaultdict(dict)
     async with connection.transaction():
+        if verbose:
+            print('Dropping collections...')
         await drop_collections(
             db, databases, root_collection_id, base_collection_id, only
         )
+        if verbose:
+            print('Resetting sequences...')
         await reset_sequences(db)
+        if verbose:
+            print('Copying collections...')
         await copy_collections(
-            db, databases, base_collections, collections, cards, dashboards
+            db, databases, base_collections, collections, cards, dashboards, verbose=verbose
         )
+        if verbose:
+            print('Copying permissions...')
         await copy_permissions(db, collections)
+        if verbose:
+            print('Copying dashboardcards...')
         await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards)
+        if verbose:
+            print('Copying cardseries...')
         await copy_cardseries(db, databases, dashboardcards, cards)
         if rollback:
             raise Exception("rollback transaction")
@@ -779,6 +802,7 @@ class Copy(Command):
         verbose = self.option("verbose")
         prompt = self.option("prompt")
         only = self.option("only")
+        print(f'verbose: {verbose}')
         asyncio.run(
             copy(
                 alls,

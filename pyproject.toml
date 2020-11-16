@@ -6,7 +6,7 @@ authors = ["aleontiev <alonetiev@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.7"
-adbc = {git = "https://github.com/aleontiev/adbc.git", rev = "v0.3.1" }
+adbc = { path = "/home/ant/code/adbc/" } # {git = "https://github.com/aleontiev/adbc.git", rev = "v0.3.1" }
 cleo = "^0.7.6"
 aiomysql = "^0.0.20"
 
