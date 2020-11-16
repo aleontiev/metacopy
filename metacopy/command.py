@@ -5,7 +5,7 @@ import json
 import re
 
 from cleo import Command
-from adbc.database import Database
+from adbc.store import Database
 from adbc.config import get_config
 
 try:
@@ -30,7 +30,7 @@ TABLES = {
 
 
 async def get_model(db, name):
-    return await db.model("public", TABLES.get(name, name))
+    return await db.get_model(TABLES.get(name, name))
 
 
 async def reset_sequences(db):
@@ -64,16 +64,21 @@ async def drop_collections(
     Permissions = await get_model(db, "permissions")
 
     where = {
-        ".and": [
-            {"location": {"starts.with": f"/{root_collection_id}/"}},
+        "and": [
+            {"like": ['location', f"'/{root_collection_id}/%'"]},
             {
-                ".not": {
-                    "location": {
-                        "starts.with": f"/{root_collection_id}/{base_collection_id}/"
-                    }
+                "not": {
+                    'like':
+                    [
+                        'location', f"'/{root_collection_id}/{base_collection_id}/%'"
+                    ]
                 }
             },
-            {".not": {"id": base_collection_id}},
+            {
+                "not": {
+                    "=": ['id', f"'{base_collection_id}'"]
+                }
+            },
         ]
     }
     # collection_ids - get cloned collection ids
@@ -85,48 +90,66 @@ async def drop_collections(
 
     permissions = await permissions_for(Permissions, collection_ids)
     permission_ids = [p["id"] for p in permissions]
+    q_permission_ids = quote_all(permission_ids)
+
+    q_collection_ids = quote_all(collection_ids)
     card_ids = (
-        await Card.where({"collection_id": {"in": collection_ids}}).field("id").get()
+        await Card.where({
+            "in": ["collection_id", q_collection_ids]
+        }).field("id").get()
     )
+    q_card_ids = quote_all(card_ids)
     dashboard_ids = (
-        await Dashboard.where({"collection_id": {"in": collection_ids}})
+        await Dashboard.where({
+            "in": ["collection_id", q_collection_ids]
+        })
         .field("id")
         .get()
     )
+    q_dashboard_ids = quote_all(dashboard_ids)
     dashboardcard_ids = (
-        await DashboardCard.where({"dashboard_id": {"in": dashboard_ids}})
+        await DashboardCard.where({
+            "in": ["dashboard_id", q_dashboard_ids]
+        })
         .field("id")
         .get()
     )
+    q_dashboardcard_ids = quote_all(dashboardcard_ids)
     other_dashboardcard_ids = (
-        await DashboardCard.where({"card_id": {"in": card_ids}})
+        await DashboardCard.where({
+            "in": ["card_id", q_card_ids]
+        })
         .field("id")
         .get()
     )
+    q_other_dashboardcard_ids = quote_all(other_dashboardcard_ids)
     cardseries_ids = (
-        await CardSeries.where({"dashboardcard_id": {"in": dashboardcard_ids}})
+        await CardSeries.where({
+            "in": ["dashboardcard_id", q_dashboardcard_ids]
+        })
         .field("id")
         .get()
     )
+    q_cardseries_ids = quote_all(cardseries_ids)
     if permission_ids:
-        await Permissions.where({"id": {"in": permission_ids}}).delete()
+        await Permissions.where({"in": ["id", q_permission_ids]}}).delete()
     if cardseries_ids:
-        await CardSeries.where({"id": {"in": cardseries_ids}}).delete()
+        await CardSeries.where({"in": ["id", q_cardseries_ids]}).delete()
     if dashboardcard_ids:
-        await DashboardCard.where({"id": {"in": dashboardcard_ids}}).delete()
+        await DashboardCard.where({"in": ["id", q_dashboardcard_ids]}).delete()
     if other_dashboardcard_ids:
-        await DashboardCard.where({"id": {"in": other_dashboardcard_ids}}).delete()
+        await DashboardCard.where({"in": ["id", q_other_dashboardcard_ids]}).delete()
     if dashboard_ids:
-        await Dashboard.where({"id": {"in": dashboard_ids}}).delete()
+        await Dashboard.where({"in": ["id", q_dashboard_ids]}).delete()
     if card_ids:
-        await Card.where({"id": {"in": card_ids}}).delete()
+        await Card.where({"in": ["id", q_card_ids]}).delete()
     if collection_ids:
-        await Collection.where({"id": {"in": collection_ids}}).delete()
+        await Collection.where({"in": ["id", q_collection_ids]}).delete()
 
 
 async def permissions_for(Permissions, collection_ids):
     permissions = await Permissions.where(
-        {"object": {"starts.with": "/collection/"}}
+        {"like": ["object", "'/collection/%'"}}
     ).get()
     return [
         p for p in permissions if any([f"/{c}/" in p["object"] for c in collection_ids])
@@ -201,10 +224,14 @@ async def copy_collection_items(
     Card = await get_model(db, "card")
     Dashboard = await get_model(db, "dashboard")
 
-    for card in await Card.where({"collection_id": collection_id}).sort("id").get():
+    for card in await Card.where({
+        "=": ['collection_id', quote(collection_id)]
+    }).sort("id").get():
         await copy_card(db, card, databases, cards=cards, collections=collections)
     for dashboard in (
-        await Dashboard.where({"collection_id": collection_id}).sort("id").get()
+        await Dashboard.where({
+            "=": ["collection_id", quote(collection_id)]
+        }).sort("id").get()
     ):
         await copy_dashboard(db, dashboard, databases, collections, dashboards)
 
@@ -225,9 +252,9 @@ async def remap_cardseries(db, link, target, dashboardcards, cards):
 
 async def copy_cardseries(db, databases, dashboardcards, cards):
     Series = await get_model(db, "card_series")
-    for link in await Series.where(
-        {"dashboardcard_id": {"in": list(dashboardcards.keys())}}
-    ).get():
+    for link in await Series.where({
+        "in": ["dashboardcard_id", quote_all(list(dashboardcards.keys()))]
+    }).get():
         for target in databases.keys():
             new_link = await remap_cardseries(db, link, target, dashboardcards, cards)
             await Series.body(new_link).add()
@@ -235,9 +262,9 @@ async def copy_cardseries(db, databases, dashboardcards, cards):
 
 async def copy_dashboardcards(db, databases, dashboards, cards, dashboardcards):
     DashboardCard = await get_model(db, "dashboard_card")
-    for link in await DashboardCard.where(
-        {"dashboard_id": {"in": list(dashboards.keys())}}
-    ).get():
+    for link in await DashboardCard.where({
+        "in": ["dashboard_id", quote_all(list(dashboards.keys()))]
+    }).get():
         link_id = link["id"]
         for target in databases.keys():
             new_link = await remap_dashboardcard(db, link, target, dashboards, cards)
@@ -329,7 +356,12 @@ async def remap_field(db, field_id, target, cards):
     key = (target_table, field["name"])
     if key not in db._cache["fields_by_name"]:
         db._cache["fields_by_name"][key] = (
-            await Field.where({"name": field["name"], "table_id": target_table})
+            await Field.where({
+                "and": [
+                    {"=": ["name", quote(field["name"])]},
+                    {'=': ["table_id", quote(target_table)]
+                ]
+            })
             .field("id")
             .one()
         )
@@ -370,7 +402,13 @@ async def remap_table(db, table_id, target, cards=None):
         key = (target, schema, name)
         if key not in db._cache["tables_by_name"]:
             db._cache["tables_by_name"][key] = (
-                await Table.where({"schema": schema, "name": name, "db_id": target})
+                await Table.where({
+                    'and': [
+                        "=": ["schema", quote(schema)],
+                        '=': ["name", quote(name)],
+                        '=': ["db_id", quote(target)]
+                    ]
+                })
                 .field("id")
                 .one()
             )
@@ -455,10 +493,9 @@ def get_database(verbose=False, prompt=False, config=None, url=None):
     connection_kwargs = {"verbose": verbose, "prompt": prompt}
     if config:
         config = get_config(config)
-        connection_kwargs["config"] = config["databases"]["metabase"]
+        connection_kwargs.update(config["databases"]["metabase"])
     elif url:
         connection_kwargs["url"] = url
-
     return Database(**connection_kwargs)
 
 
@@ -480,13 +517,18 @@ async def copy_collection(
     source_collection = await Collection.key(collection_id).one()
     source_location = source_collection['location']
     source_collections = await Collection.where(
-        {"location": {"starts.with": f'{source_location}{collection_id}/'}}
-    ).get()
+        {"like": ["location", f'"{source_location}{collection_id}/%"']
+    }).get()
     source_collections.append(source_collection)
 
     target_database = (
         await DB.take("id", "name")
-        .where({".or": [{"name": {"starts.with": database}}, {"name": database}]})
+        .where({
+            "or": [
+                {"like": ["name", f'"{database}%"']},
+                {'=': ['name', quote(database)]}
+            ]
+        })
         .one()
     )
     target_database_id = target_database['id']
@@ -541,7 +583,12 @@ async def copy_question(
     source_card = await Card.key(question).one()
     target_database = (
         await DB.take("id", "name")
-        .where({".or": [{"name": {"starts.with": database}}, {"name": database}]})
+        .where({
+            "or": [
+                {"like": ["name", f'"{database}%"']},
+                {"=": ["name", quote(database)]}
+            ]
+        })
         .one()
     )
 
@@ -593,19 +640,29 @@ async def copy(
         if r["id"] != base_database_id and should_process(r["name"], only)
     }
     root_collection_id = (
-        await Collection.field("id").where({"location": "/", "name": alls}).one()
+        await Collection.field("id").where({
+            "and": [
+                {'=': ["location", "'/'"]},
+                {'=': ["name", quote(alls)]}
+            ]
+        }).one()
     )
     base_collection = await Collection.where(
         {
-            ".and": [
-                {"location": {"starts.with": f"/{root_collection_id}/"}},
-                {".or": [{"name": {"istarts.with": base_name}}, {"name": base}]},
+            "and": [
+                {"like": ["location", f"'/{root_collection_id}/%'"]},
+                {
+                    "or": [
+                        {"ilike": ["name", quote(base_name)]},
+                        {"=": ["name", quote(base)]}
+                    ]
+                },
             ]
         }
     ).one()
     base_collection_id = base_collection["id"]
     base_collections = await Collection.where(
-        {"location": {"starts.with": f"/{root_collection_id}/{base_collection_id}/"}}
+        {"like": ["location", f"'/{root_collection_id}/{base_collection_id}/%'"]}
     ).get()
     base_collections.append(base_collection)
 
