@@ -183,7 +183,7 @@ async def copy_permissions(db, collections, verbose=False):
             print("Copying permission#{permission['id']}...")
         new_permissions = remap_permissions(permission, collections)
         if new_permissions:
-            await Permissions.values(literal(new_permissions)).add()
+            await Permissions.values(new_permissions).add()
 
 
 async def copy_collections(db, databases, base, collections, cards, dashboards, verbose=False):
@@ -194,7 +194,7 @@ async def copy_collections(db, databases, base, collections, cards, dashboards, 
             new_collection = await remap_collection(
                 db, collection, target, collections, databases
             )
-            new_collection = await Collection.values(literal([new_collection])).take("id").add()
+            new_collection = await Collection.values([new_collection]).take("id").add()
             collections[collection_id][target] = new_collection["id"]
 
         if verbose:
@@ -211,7 +211,7 @@ async def copy_card(db, card, databases, cards=None, collections=None):
         new_card = await remap_card(
             db, card, target, cards=cards, collections=collections
         )
-        new_card = await Card.values(literal([new_card])).take("id").add()
+        new_card = await Card.values([new_card]).take("id").add()
         if cards is not None:
             cards[card_id][target] = new_card["id"]
     return new_card["id"]
@@ -222,7 +222,7 @@ async def copy_dashboard(db, dashboard, databases, collections, dashboards):
     dashboard_id = dashboard["id"]
     for target in databases.keys():
         new_dashboard = await remap_dashboard(db, dashboard, target, collections)
-        new_dashboard = await Dashboard.values(literal([new_dashboard])).take("id").add()
+        new_dashboard = await Dashboard.values([new_dashboard]).take("id").add()
         dashboards[dashboard_id][target] = new_dashboard["id"]
 
 
@@ -271,7 +271,7 @@ async def copy_cardseries(db, databases, dashboardcards, cards, verbose=False):
             print(f"Copying cardseries#{link['id']}...")
         for target in databases.keys():
             new_link = await remap_cardseries(db, link, target, dashboardcards, cards)
-            await Series.values(literal([new_link])).add()
+            await Series.values([new_link]).add()
 
 
 async def copy_dashboardcards(db, databases, dashboards, cards, dashboardcards, verbose=False):
@@ -284,7 +284,7 @@ async def copy_dashboardcards(db, databases, dashboards, cards, dashboardcards, 
             print(f"Copying dashboardcard#{link['id']}...")
         for target in databases.keys():
             new_link = await remap_dashboardcard(db, link, target, dashboards, cards)
-            new_link = await DashboardCard.values(literal([new_link])).take("id").add()
+            new_link = await DashboardCard.values([new_link]).take("id").add()
             dashboardcards[link_id][target] = new_link["id"]
 
 
