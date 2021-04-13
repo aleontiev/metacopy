@@ -629,7 +629,35 @@ async def copy(
     only=None,
     rollback=False,
     prompt=False,
+    delta=False
 ):
+    """
+    full copy:
+
+        step 0: get all databases, then iterate one collection at a time starting from the root of the basis:
+        step 1: get basis collection data (including all dashboards, cards, links, but not sub-collections)
+        step 2: get target collections and delete them all in bulk (makes full-processing much simpler!)
+        step 3: create all target collections with remapped IDs
+        step 4: recurse on child collections (back to step 1)
+
+    delta copy:
+
+        step 0: get all databases, then iterate one collection at a time starting from the root of the basis:
+        step 1: get basis collection data (including all dashboards, cards, links, but not sub-collections)
+        step 2: normalize basis collection data with "namification" (assign locally unique names within the corresponding basis)
+            e.g. suppose the all collection is "All" and the base is "All" > "A"
+                 the Collection "All" > "A" would be named "collections/"
+                 a Collection "All" > "B" would also be named "collections/" (this is the name of the root in each cloned tree)
+                 a Card "All" > "A" > "My Question" would be named "cards/My Question"
+                 a Card "All" > "B" > "My Question" would be named "cards/My Question"
+                 a schema element (Table, Field) would be named by the underlying schema name
+        step 3: get possible target collections (clones of the basis collection) and apply namification
+        step 4: identify collections that need to be 1) created 2) updated 3) deleted based on name (name change = create+delete)
+        step 5a: create any collections that should but do not exist using bulk insert with remapped IDs
+        step 5b: delete any collections that should not exist using bulk delete
+        step 5c: sync existing collections' dashboards/cards/links using similar process to steps 4-5 applied to child items
+        step 6: recurse on child collections (back to step 1)
+    """
     db = get_database(verbose=verbose, prompt=prompt, config=config, url=url)
     setup_cache(db)
     connection = await db.get_connection()
