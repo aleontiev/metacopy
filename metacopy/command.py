@@ -67,12 +67,12 @@ async def reset_sequences(db):
 async def drop_collections(
     db, databases, root_collection_id, base_collection_id, only=None
 ):
+    # no longer deleting permissions
     Collection = await get_model(db, "collection")
     Card = await get_model(db, "card")
     Dashboard = await get_model(db, "dashboard")
     DashboardCard = await get_model(db, "dashboard_card")
     CardSeries = await get_model(db, "card_series")
-    Permissions = await get_model(db, "permissions")
 
     where = {
         "and": [
@@ -98,9 +98,6 @@ async def drop_collections(
     collection_ids = [c["id"] for c in collections if should_process(c["name"], only)]
     if not collection_ids:
         return
-
-    permissions = await permissions_for(Permissions, collection_ids)
-    permission_ids = [p["id"] for p in permissions]
 
     card_ids = (
         await Card.where({
@@ -135,8 +132,6 @@ async def drop_collections(
         .field("id")
         .get()
     )
-    if permission_ids:
-        await Permissions.where({"in": ["id", permission_ids]}).delete()
     if cardseries_ids:
         await CardSeries.where({"in": ["id", cardseries_ids]}).delete()
     if dashboardcard_ids:
@@ -566,7 +561,8 @@ async def copy_collection(
         await copy_collections(
             db, databases, source_collections, collections, cards, dashboards
         )
-        await copy_permissions(db, collections)
+        # no longer copying permissions
+        # await copy_permissions(db, collections)
         await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards)
         await copy_cardseries(db, databases, dashboardcards, cards)
 
@@ -733,9 +729,10 @@ async def copy(
         await copy_collections(
             db, databases, base_collections, collections, cards, dashboards, verbose=verbose
         )
-        if verbose:
-            print('Copying permissions...')
-        await copy_permissions(db, collections, verbose=verbose)
+        # no longer copying permissions
+        #if verbose:
+        #    print('Copying permissions...')
+        #await copy_permissions(db, collections, verbose=verbose)
         if verbose:
             print('Copying dashboardcards...')
         await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards, verbose=verbose)
