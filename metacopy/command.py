@@ -561,8 +561,7 @@ async def copy_collection(
         await copy_collections(
             db, databases, source_collections, collections, cards, dashboards
         )
-        # no longer copying permissions
-        # await copy_permissions(db, collections)
+        await copy_permissions(db, collections)
         await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards)
         await copy_cardseries(db, databases, dashboardcards, cards)
 
@@ -729,10 +728,9 @@ async def copy(
         await copy_collections(
             db, databases, base_collections, collections, cards, dashboards, verbose=verbose
         )
-        # no longer copying permissions
-        #if verbose:
-        #    print('Copying permissions...')
-        #await copy_permissions(db, collections, verbose=verbose)
+        if verbose:
+            print('Copying permissions...')
+        await copy_permissions(db, collections, verbose=verbose)
         if verbose:
             print('Copying dashboardcards...')
         await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards, verbose=verbose)
