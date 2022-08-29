@@ -28,6 +28,7 @@ TABLES = {
     "card_series": "dashboardcard_series",
 }
 
+
 def literal(X):
     if isinstance(X, list):
         return [literal(x) for x in X]
@@ -37,7 +38,6 @@ def literal(X):
         return f'"{X}"'
     else:
         return X
-
 
 
 async def get_model(db, name):
@@ -76,20 +76,16 @@ async def drop_collections(
 
     where = {
         "and": [
-            {"like": ['location', f"'/{root_collection_id}/%'"]},
+            {"like": ["location", f"'/{root_collection_id}/%'"]},
             {
                 "not": {
-                    'like':
-                    [
-                        'location', f"'/{root_collection_id}/{base_collection_id}/%'"
+                    "like": [
+                        "location",
+                        f"'/{root_collection_id}/{base_collection_id}/%'",
                     ]
                 }
             },
-            {
-                "not": {
-                    "=": ['id', base_collection_id]
-                }
-            },
+            {"not": {"=": ["id", base_collection_id]}},
         ]
     }
     # collection_ids - get cloned collection ids
@@ -100,35 +96,23 @@ async def drop_collections(
         return
 
     card_ids = (
-        await Card.where({
-            "in": ["collection_id", collection_ids]
-        }).field("id").get()
+        await Card.where({"in": ["collection_id", collection_ids]}).field("id").get()
     )
     dashboard_ids = (
-        await Dashboard.where({
-            "in": ["collection_id", collection_ids]
-        })
+        await Dashboard.where({"in": ["collection_id", collection_ids]})
         .field("id")
         .get()
     )
     dashboardcard_ids = (
-        await DashboardCard.where({
-            "in": ["dashboard_id", dashboard_ids]
-        })
+        await DashboardCard.where({"in": ["dashboard_id", dashboard_ids]})
         .field("id")
         .get()
     )
     other_dashboardcard_ids = (
-        await DashboardCard.where({
-            "in": ["card_id", card_ids]
-        })
-        .field("id")
-        .get()
+        await DashboardCard.where({"in": ["card_id", card_ids]}).field("id").get()
     )
     cardseries_ids = (
-        await CardSeries.where({
-            "in": ["dashboardcard_id", dashboardcard_ids]
-        })
+        await CardSeries.where({"in": ["dashboardcard_id", dashboardcard_ids]})
         .field("id")
         .get()
     )
@@ -147,9 +131,7 @@ async def drop_collections(
 
 
 async def permissions_for(Permissions, collection_ids):
-    permissions = await Permissions.where(
-        {"like": ["object", "'/collection/%'"]}
-    ).get()
+    permissions = await Permissions.where({"like": ["object", "'/collection/%'"]}).get()
     return [
         p for p in permissions if any([f"/{c}/" in p["object"] for c in collection_ids])
     ]
@@ -175,13 +157,15 @@ async def copy_permissions(db, collections, verbose=False):
     permissions = await permissions_for(Permissions, collection_ids)
     for permission in permissions:
         if verbose:
-            print("Copying permission#{permission['id']}...")
+            print(f"Copying permission#{permission['id']}...")
         new_permissions = remap_permissions(permission, collections)
         if new_permissions:
             await Permissions.values(new_permissions).add()
 
 
-async def copy_collections(db, databases, base, collections, cards, dashboards, verbose=False):
+async def copy_collections(
+    db, databases, base, collections, cards, dashboards, verbose=False
+):
     Collection = await get_model(db, "collection")
     for collection in sorted(base, key=lambda x: x["location"].count("/")):
         collection_id = collection["id"]
@@ -193,9 +177,15 @@ async def copy_collections(db, databases, base, collections, cards, dashboards, 
             collections[collection_id][target] = new_collection["id"]
 
         if verbose:
-            print(f'Copying collection #{collection_id}...')
+            print(f"Copying collection #{collection_id}...")
         await copy_collection_items(
-            db, collection_id, databases, collections, cards, dashboards, verbose=verbose
+            db,
+            collection_id,
+            databases,
+            collections,
+            cards,
+            dashboards,
+            verbose=verbose,
         )
 
 
@@ -227,16 +217,14 @@ async def copy_collection_items(
     Card = await get_model(db, "card")
     Dashboard = await get_model(db, "dashboard")
 
-    for card in await Card.where({
-        "=": ['collection_id', collection_id]
-    }).sort("id").get():
+    for card in (
+        await Card.where({"=": ["collection_id", collection_id]}).sort("id").get()
+    ):
         if verbose:
             print(f"Copying card #{card['id']}...")
         await copy_card(db, card, databases, cards=cards, collections=collections)
     for dashboard in (
-        await Dashboard.where({
-            "=": ["collection_id", collection_id]
-        }).sort("id").get()
+        await Dashboard.where({"=": ["collection_id", collection_id]}).sort("id").get()
     ):
         if verbose:
             print(f"Copying dashboard #{dashboard['id']}...")
@@ -259,9 +247,9 @@ async def remap_cardseries(db, link, target, dashboardcards, cards):
 
 async def copy_cardseries(db, databases, dashboardcards, cards, verbose=False):
     Series = await get_model(db, "card_series")
-    for link in await Series.where({
-        "in": ["dashboardcard_id", list(dashboardcards.keys())]
-    }).get():
+    for link in await Series.where(
+        {"in": ["dashboardcard_id", list(dashboardcards.keys())]}
+    ).get():
         if verbose:
             print(f"Copying cardseries#{link['id']}...")
         for target in databases.keys():
@@ -269,11 +257,13 @@ async def copy_cardseries(db, databases, dashboardcards, cards, verbose=False):
             await Series.values([new_link]).add()
 
 
-async def copy_dashboardcards(db, databases, dashboards, cards, dashboardcards, verbose=False):
+async def copy_dashboardcards(
+    db, databases, dashboards, cards, dashboardcards, verbose=False
+):
     DashboardCard = await get_model(db, "dashboard_card")
-    for link in await DashboardCard.where({
-        "in": ["dashboard_id", list(dashboards.keys())]
-    }).get():
+    for link in await DashboardCard.where(
+        {"in": ["dashboard_id", list(dashboards.keys())]}
+    ).get():
         link_id = link["id"]
         if verbose:
             print(f"Copying dashboardcard#{link['id']}...")
@@ -296,9 +286,7 @@ def remap_collection_location(location, target, collections):
             can_fail = False
         else:
             if not can_fail:
-                raise ValueError(
-                    f'failed to remap location {location} segment: {part}'
-                )
+                raise ValueError(f"failed to remap location {location} segment: {part}")
     result = "/".join([str(p) for p in parts])
     result = f"/{result}/"
     return result
@@ -335,7 +323,7 @@ async def remap_dashboardcard(db, link, target, dashboards, cards):
             link["card_id"] = cards[old_card_id][target]
         except KeyError:
             raise ValueError(
-                f'Failed to remap dashboardcard on source card: {old_card_id}'
+                f"Failed to remap dashboardcard on source card: {old_card_id}"
             )
     link["dashboard_id"] = dashboards[link["dashboard_id"]][target]
 
@@ -367,12 +355,14 @@ async def remap_field(db, field_id, target, cards):
     key = (target_table, field["name"])
     if key not in db._cache["fields_by_name"]:
         db._cache["fields_by_name"][key] = (
-            await Field.where({
-                "and": [
-                    {"=": ["name", literal(field["name"])]},
-                    {'=': ["table_id", target_table]}
-                ]
-            })
+            await Field.where(
+                {
+                    "and": [
+                        {"=": ["name", literal(field["name"])]},
+                        {"=": ["table_id", target_table]},
+                    ]
+                }
+            )
             .field("id")
             .one()
         )
@@ -396,7 +386,7 @@ async def remap_table(db, table_id, target, cards=None):
                 if card_id in cards:
                     print(f"(cards[{card_id}] = {cards[card_id]})")
                 else:
-                    print(f'(cards = {list(cards.keys())})')
+                    print(f"(cards = {list(cards.keys())})")
                 raise
         else:
             # recursively copy this card
@@ -416,13 +406,15 @@ async def remap_table(db, table_id, target, cards=None):
         key = (target, schema, name)
         if key not in db._cache["tables_by_name"]:
             db._cache["tables_by_name"][key] = (
-                await Table.where({
-                    'and': [
-                        {"=": ["schema", literal(schema)]},
-                        {'=': ["name", literal(name)]},
-                        {'=': ["db_id", target]}
-                    ]
-                })
+                await Table.where(
+                    {
+                        "and": [
+                            {"=": ["schema", literal(schema)]},
+                            {"=": ["name", literal(name)]},
+                            {"=": ["db_id", target]},
+                        ]
+                    }
+                )
                 .field("id")
                 .one()
             )
@@ -455,7 +447,7 @@ async def remap_query(db, query, target, cards=None):
                     if cards is not None:
                         new_value = cards[value][target]
                     else:
-                        Card = await get_model(db, 'card')
+                        Card = await get_model(db, "card")
                         card = await Card.key(card_id).one()
                         new_value = await copy_card(db, card, {target: 1})
             else:
@@ -522,32 +514,34 @@ async def copy_collection(
     config=None,
     rollback=False,
     verbose=False,
-    prompt=False
+    prompt=False,
 ):
     db = get_database(verbose=verbose, prompt=prompt, config=config, url=url)
     setup_cache(db)
-    Collection = await get_model(db, 'collection')
-    DB = await get_model(db, 'database')
+    Collection = await get_model(db, "collection")
+    DB = await get_model(db, "database")
 
     collection_id = int(collection)
     source_collection = await Collection.key(collection_id).one()
-    source_location = source_collection['location']
+    source_location = source_collection["location"]
     source_collections = await Collection.where(
-        {"like": ["location", f'"{source_location}{collection_id}/%"']
-    }).get()
+        {"like": ["location", f'"{source_location}{collection_id}/%"']}
+    ).get()
     source_collections.append(source_collection)
 
     target_database = (
         await DB.take("id", "name")
-        .where({
-            "or": [
-                {"like": ["name", f'"{database}%"']},
-                {'=': ['name', literal(database)]}
-            ]
-        })
+        .where(
+            {
+                "or": [
+                    {"like": ["name", f'"{database}%"']},
+                    {"=": ["name", literal(database)]},
+                ]
+            }
+        )
         .one()
     )
-    target_database_id = target_database['id']
+    target_database_id = target_database["id"]
     databases = {target_database_id: target_database["name"]}
     collections = defaultdict(dict)
     cards = defaultdict(dict)
@@ -570,25 +564,20 @@ async def copy_collection(
             num_cards = len(cards)
             num_subcollections = len(collections) - 1
             num_dashboards = len(dashboards)
-            print(f'new collection ID: {new_id}')
+            print(f"new collection ID: {new_id}")
             if num_subcollections:
-                print(f'+ {num_subcollections} sub-collections')
+                print(f"+ {num_subcollections} sub-collections")
             if num_cards:
-                print(f'+ {num_cards} cards')
+                print(f"+ {num_cards} cards")
             if num_dashboards:
-                print(f'+ {num_dashboards} dashboards')
+                print(f"+ {num_dashboards} dashboards")
         if rollback:
             raise Exception("rollback transaction")
     return new_id
 
 
 async def copy_question(
-    question,
-    database,
-    url=None,
-    config=None,
-    verbose=False,
-    prompt=False,
+    question, database, url=None, config=None, verbose=False, prompt=False,
 ):
     db = get_database(verbose=verbose, prompt=prompt, config=config, url=url)
     setup_cache(db)
@@ -599,12 +588,14 @@ async def copy_question(
     source_card = await Card.key(question).one()
     target_database = (
         await DB.take("id", "name")
-        .where({
-            "or": [
-                {"like": ["name", f'"{database}%"']},
-                {"=": ["name", literal(database)]}
-            ]
-        })
+        .where(
+            {
+                "or": [
+                    {"like": ["name", f'"{database}%"']},
+                    {"=": ["name", literal(database)]},
+                ]
+            }
+        )
         .one()
     )
 
@@ -624,7 +615,7 @@ async def copy(
     only=None,
     rollback=False,
     prompt=False,
-    delta=False
+    delta=False,
 ):
     """
     full copy:
@@ -684,12 +675,9 @@ async def copy(
         if r["id"] != base_database_id and should_process(r["name"], only)
     }
     root_collection_id = (
-        await Collection.field("id").where({
-            "and": [
-                {'=': ["location", "'/'"]},
-                {'=': ["name", literal(alls)]}
-            ]
-        }).one()
+        await Collection.field("id")
+        .where({"and": [{"=": ["location", "'/'"]}, {"=": ["name", literal(alls)]}]})
+        .one()
     )
     base_collection = await Collection.where(
         {
@@ -698,7 +686,7 @@ async def copy(
                 {
                     "or": [
                         {"ilike": ["name", literal(base_name)]},
-                        {"=": ["name", literal(base)]}
+                        {"=": ["name", literal(base)]},
                     ]
                 },
             ]
@@ -716,29 +704,38 @@ async def copy(
     dashboardcards = defaultdict(dict)
     async with connection.transaction():
         if verbose:
-            print('Dropping collections...')
+            print("Dropping collections...")
         await drop_collections(
             db, databases, root_collection_id, base_collection_id, only
         )
         if verbose:
-            print('Resetting sequences...')
+            print("Resetting sequences...")
         await reset_sequences(db)
         if verbose:
-            print('Copying collections...')
+            print("Copying collections...")
         await copy_collections(
-            db, databases, base_collections, collections, cards, dashboards, verbose=verbose
+            db,
+            databases,
+            base_collections,
+            collections,
+            cards,
+            dashboards,
+            verbose=verbose,
         )
         if verbose:
-            print('Copying permissions...')
-        await copy_permissions(db, collections, verbose=verbose)
+            print("Copying permissions...")
+        # await copy_permissions(db, collections, verbose=verbose)
         if verbose:
-            print('Copying dashboardcards...')
-        await copy_dashboardcards(db, databases, dashboards, cards, dashboardcards, verbose=verbose)
+            print("Copying dashboardcards...")
+        await copy_dashboardcards(
+            db, databases, dashboards, cards, dashboardcards, verbose=verbose
+        )
         if verbose:
-            print('Copying cardseries...')
+            print("Copying cardseries...")
         await copy_cardseries(db, databases, dashboardcards, cards, verbose=verbose)
         if rollback:
             raise Exception("rollback transaction")
+
 
 class CopyCollection(Command):
     """Copies Metabase Collection + sub-collections + Questions + Dashboards
@@ -751,6 +748,7 @@ class CopyCollection(Command):
         {--p|prompt : prompt before all queries}
         {--u|url : Metabase DB connection string}
     """
+
     def handle(self):
         if uvloop:
             uvloop.install()
@@ -772,6 +770,7 @@ class CopyCollection(Command):
                 prompt=prompt,
             )
         )
+
 
 class CopyQuestion(Command):
     """Copies single Metabase question within the same collection, changing datasource
@@ -829,7 +828,7 @@ class Copy(Command):
         url = self.option("url")
         dry = self.option("dry")
         verbose = self.option("verbose")
-        if verbose == 'null':
+        if verbose == "null":
             verbose = 1
         else:
             try:
