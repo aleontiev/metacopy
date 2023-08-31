@@ -423,11 +423,12 @@ async def remap_table(db, table_id, target, cards=None):
 
 async def remap_query(db, query, target, cards=None):
     FIELD_IDENTIFIERS = {'field-id', 'field'}
-    FIELD_IDENTIFIER = 'field'
     if isinstance(query, list):
-        if len(query) == 2 and query[0] in FIELD_IDENTIFIERS:
+        # special case handling for array segments that represent field hybrids
+        if len(query) in {2,3} and query[0] in FIELD_IDENTIFIERS:
+            # ['field-id', 123] or ['field', 123, {'join': ...}]
             field = await remap_field(db, query[1], target, cards=cards)
-            return [FIELD_IDENTIFIER, field]
+            return [query[0], field, *query[2:]]
         else:
             return [await remap_query(db, q, target, cards=cards) for q in query]
     elif isinstance(query, dict):
