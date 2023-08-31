@@ -422,10 +422,12 @@ async def remap_table(db, table_id, target, cards=None):
 
 
 async def remap_query(db, query, target, cards=None):
+    FIELD_IDENTIFIERS = {'field-id', 'field'}
+    FIELD_IDENTIFIER = 'field'
     if isinstance(query, list):
-        if len(query) == 2 and query[0] == "field-id":
+        if len(query) == 2 and query[0] in FIELD_IDENTIFIERS:
             field = await remap_field(db, query[1], target, cards=cards)
-            return ["field-id", field]
+            return [FIELD_IDENTIFIER, field]
         else:
             return [await remap_query(db, q, target, cards=cards) for q in query]
     elif isinstance(query, dict):
